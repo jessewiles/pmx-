@@ -34,15 +34,16 @@ def load_vars(path: str = os.path.join(THIS_DIR, f"env.{ENV}.json")) -> SafeArgs
     return result
 
 
-def get_er_id(
+def get_entity_id(
     included: List[Dict[str, Any]],
     type_string: str,
+    role_string: str,
 ) -> str:
     try:
         er = next(
             filter(
-                lambda i: i["type"] == "policy_entity_relation"
-                and i["attributes"]["role"] == type_string,
+                lambda i: i["type"] == type_string
+                and i["attributes"]["role"] == role_string,
                 included,
             )
         )
@@ -51,3 +52,22 @@ def get_er_id(
 
     er = Prodict(**er)
     return er.relationships.entity.data.id
+
+
+def get_er_id(
+    included: List[Dict[str, Any]],
+    type_string: str,
+    role_string: str,
+) -> str:
+    try:
+        er = next(
+            filter(
+                lambda i: i["type"] == type_string
+                and i["attributes"]["role"] == role_string,
+                included,
+            )
+        )
+    except StopIteration:
+        return str()
+
+    return er["id"]

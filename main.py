@@ -140,7 +140,9 @@ class Request(E2EBase):
             payload = f"""\
     payload = str()
     with open(os.path.join(THIS_DIR, "data", "{self.greek}.json"), "r") as reader:
-        payload = json.loads(reader.read().format_map(CLOSET_VARS))
+        content = reader.read().format_map(CLOSET_VARS)
+        if content:
+            payload = json.loads(content)
 """
         writer.write(
             f"""def {self.normal_name}_{self.greek}():
@@ -174,15 +176,36 @@ class Request(E2EBase):
                 key, val = trim.split(", ")
                 key = key.replace("\\", "").replace('"', "").strip()
                 val = val.replace("\\", "").replace('"', "").strip()
-                if "additional_insured_id" in key:
+
+                if "jsonData.data.id);" in line:
+                    result.append(f'CLOSET_VARS["{key}"] = json_data.data.id')
+                    continue
+
+                er_type = (
+                    "endorsement_quote_entity_relation"
+                    if "endorsement_quote" in line
+                    else "policy_entity_relation"
+                )
+                er_role = (
+                    "additional_insured"
+                    if "additional_insured" in key or "_ai" in key
+                    else "primary_named_insured"
+                )
+
+                if "relation" in key:
                     result.append(
-                        f'CLOSET_VARS["{key}"] = get_er_id(json_data.included, "additional_insured")'
+                        f'CLOSET_VARS["{key}"] = get_er_id(json_data.included, "{er_type}", "{er_role}")'
                     )
                     continue
 
-                if "primary_named_insured_id" in key:
+                if (
+                    "primary_named_insured" in key
+                    or "additional_insured" in key
+                    or "_ai" in key
+                    or "_pni" in key
+                ):
                     result.append(
-                        f'CLOSET_VARS["{key}"] = get_er_id(json_data.included, "primary_named_insured")'
+                        f'CLOSET_VARS["{key}"] = get_entity_id(json_data.included, "{er_type}", "{er_role}")'
                     )
                     continue
 
@@ -207,6 +230,10 @@ class Request(E2EBase):
             elif "pm.response.to.have.status" in line:
                 status = line.split("(")[-1][:-2]
                 result.append(f"assert response.status_code == {status}")
+
+            elif "pm.expect(jsonData.data).to.have.lengthOf" in line:
+                expected_length = int(line.split("(")[-1][:-1].split(")")[0])
+                result.append(f"assert len(json_data.data) == {expected_length}")
 
             elif "pm.expect(jsonData" in line:
                 if (
@@ -336,7 +363,7 @@ import moment
 from prodict import Prodict
 
 from client import BoostClient
-from vars import get_er_id, load_vars
+from vars import get_entity_id, get_er_id, load_vars
 {NEWLINE.join(var_imports)}
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)

@@ -90,5 +90,8 @@ class BoostClient:
 
     def delete(self, endpoint, json):
         self.sleep()
-        response = requests.delete(endpoint, json=json, headers=self.write_headers)
+        if json:
+            response = requests.delete(endpoint, json=json, headers=self.write_headers)
+        else:
+            response = requests.delete(endpoint, headers=self.read_headers)
         return response
