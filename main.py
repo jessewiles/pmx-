@@ -21,6 +21,8 @@ NEWLINE: str = "\n"
 PREFIX: str = "  "
 INDENTED: str = f"{NEWLINE}    "
 WORKSPACE_DIR: str = ""
+PANDADOC_MESSASGE: str = ""
+WRITE_OUT_EVENTS: bool = True
 
 
 class E2EBase:
@@ -56,19 +58,7 @@ class Request(E2EBase):
             .replace("{{", "{")
             .replace("}}", "}")
         )
-        self.payload: str = (
-            input_dict.get("request", {})
-            .get("body", {})
-            .get("raw", "")
-            .replace("{{", "[[")
-            .replace("}}", "]]")
-            .replace("{", "^^^")
-            .replace("}", "###")
-            .replace("[[", "{")
-            .replace("]]", "}")
-            .replace("^^^", "{{")
-            .replace("###", "}}")
-        )
+        self.payload: str = input_dict.get("request", {}).get("body", {}).get("raw", "")
         self.greek: str = str()
         if count >= GREEK_LEN:
             n: int = int(count / GREEK_LEN)
@@ -81,6 +71,8 @@ class Request(E2EBase):
             self.body: Dict[str, Any] = json.loads(self.payload)
         except json.decoder.JSONDecodeError:
             self.body = {}
+
+        self.is_pandadoc_req: bool = "pandadoc" in self.normal_name
 
         self.pre_script_raw: str = str()
         self.pre_script: List[str] = []
@@ -135,26 +127,67 @@ class Request(E2EBase):
 
     def write_request(self, writer) -> None:
         furl: str = self.url
+
         payload: Optional[str] = None
         if self.method in ["POST", "PATCH", "PUT", "DELETE"]:
             payload = f"""\
     payload = str()
-    with open(os.path.join(THIS_DIR, "data", "{self.greek}.json"), "r") as reader:
-        content = reader.read().format_map(CLOSET_VARS)
-        if content:
-            payload = json.loads(content)
+    template = TEMPLATE_ENV.get_template("{self.greek}.json")
+    content = template.render(**CLOSET_VARS)
+    if content:
+        payload = json.loads(content)
+"""
+            if self.is_pandadoc_req:
+                payload += """\
+    CLOSET_VARS["pandadoc_signature"] = get_pandadoc_signature(
+        CLOSET_VARS["pandadoc_webhook_key"], json.dumps(payload)
+    )
 """
         writer.write(
             f"""def {self.normal_name}_{self.greek}():
     print("*** Beginning request: {self.normal_name}_{self.greek} ***")
     \"\"\" {self.method} - {self.name} \"\"\"
-    \"\"\" {self.pre_script_raw} \"\"\"
+    """
+        )
+        if WRITE_OUT_EVENTS:
+            writer.write(
+                f"""\
+\"\"\" {self.pre_script_raw} \"\"\"
+"""
+            )
+        if self.is_pandadoc_req:
+            doc_id: str = (
+                "cbyMyQhJgYDu9SeU5zTc5n"
+                if "pandadoc_document_id" in self.pre_script_raw
+                else "iE7DToRRKNnYXp2DWYd458"
+            )
+            quote_type: str = (
+                "endorsement_quote"
+                if "endorsement_quote" in self.pre_script_raw
+                else "quote"
+            )
+            writer.write(
+                f"""
+    CLOSET_VARS["quote_type"] = "{quote_type}"
+    CLOSET_VARS["document_id"] = "{doc_id}"
+"""
+            )
+        writer.write(
+            f"""\
     {INDENTED.join(self.pre_script_event_vars)}
 {f"{NEWLINE}{payload}{NEWLINE}    " if payload else "    "}response = getattr(CLIENT, "{self.method.lower()}")(
         "{furl}".format_map(CLOSET_VARS),{NEWLINE if payload else str()}{"        json=payload," if payload else str()}
     )
-
-    \"\"\" {self.test_script_raw} \"\"\"
+    """
+        )
+        if WRITE_OUT_EVENTS:
+            writer.write(
+                f"""\
+\"\"\" {self.test_script_raw} \"\"\"
+"""
+            )
+        writer.write(
+            f"""\
     print("*** Verifying: {self.normal_name}_{self.greek} results ***")
     print(str())
     {INDENTED.join(self.test_script_event_vars)}
@@ -164,12 +197,16 @@ class Request(E2EBase):
         )
         if self.method in ["POST", "PATCH", "PUT", "DELETE"]:
             with open(os.path.join(self.data_dir, f"{self.greek}.json"), "w") as writer:
-                writer.write(self.payload)
+                if "pandadoc_message" in self.payload:
+                    writer.write(PANDADOC_MESSASGE)
+                else:
+                    writer.write(self.payload)
 
     def extract_event_vars(self, input_list: List) -> List[str]:
         result: List[str] = []
         useNextLiteralVal: bool = False
         for line in input_list:
+            line = line.split("//")[0]
             if "pm.variables.set" in line or "pm.environment.set" in line:
                 trim = line.split("(")[1]
                 trim = trim.split(")")[0]
@@ -212,7 +249,9 @@ class Request(E2EBase):
                 if "jsonData.data" in line:
                     parts = line.split("jsonData")
                     # Second half of split minus trailing );
-                    result.append(f'CLOSET_VARS["{key}"] = json_data{parts[-1][:-2]}')
+                    result.append(
+                        f'CLOSET_VARS["{key}"] = json_data{parts[-1].rstring(";").rstring(")")}'
+                    )
                     continue
                 if useNextLiteralVal:
                     if "format(" in line:
@@ -268,6 +307,28 @@ class Request(E2EBase):
                         useNextLiteralVal = True
                     except IndexError:
                         logger.warning(f"bugging out on {line}")
+
+            elif "pm.environment.get" in line and "pm.expect" not in line:
+                wline = (
+                    line.replace("var ", 'CLOSET_VARS["')
+                    .replace("pm.environment.get(", "CLOSET_VARS[")
+                    .replace(");", "]")
+                    .replace(" = ", '"] = ')
+                )
+                result.append(wline.strip())
+
+            elif "pm.variables.get" in line and "pm.expect" not in line:
+                wline = (
+                    line.replace("var ", 'CLOSET_VARS["')
+                    .replace("pm.variables.get(", "CLOSET_VARS[")
+                    .replace(");", "]")
+                    .replace(" = ", '"] = ')
+                )
+                result.append(wline.strip())
+
+            elif "setTimeout" in line:
+                timeout = int(line.split(",")[-1].rstrip(";").rstrip(")").strip())
+                result.append(f"time.sleep({timeout} / 1000)")
 
         return result
 
@@ -357,17 +418,24 @@ VARS = {{
 import logging
 import os
 import sys
+import time
 sys.path.insert(0, "{WORKSPACE_DIR}")  # do better
 
 import moment
 from prodict import Prodict
+from jinja2 import Environment, PackageLoader, select_autoescape
 
 from client import BoostClient
-from vars import get_entity_id, get_er_id, load_vars
+from vars import get_entity_id, get_er_id, get_pandadoc_signature, load_vars
 {NEWLINE.join(var_imports)}
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 logger = logging.getLogger("e2e")
+
+TEMPLATE_ENV: Environment = Environment(
+    loader=PackageLoader("{'.'.join(self.stack)}", package_path="data"),
+    autoescape=select_autoescape(["json"]),
+)
 
 THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
 CLOSET_VARS = dict(load_vars())
@@ -452,6 +520,7 @@ if __name__ == "__main__":
 
 def setup_workspace():
     global WORKSPACE_DIR
+    global PANDADOC_MESSASGE
 
     WORKSPACE_DIR = os.path.join(THIS_DIR, "scenes")
     os.makedirs(WORKSPACE_DIR, exist_ok=True)
@@ -480,6 +549,8 @@ ENV: str = "local"
 ALL_THE_VARS: SafeArgs = load_vars(os.path.join(THIS_DIR, "vars", f"env.{ENV}.json"))
 """
         )
+    with open(os.path.join(THIS_DIR, "vars", "pandadoc.json.tmpl"), "r") as reader:
+        PANDADOC_MESSASGE = reader.read()
 
 
 def extract_env(input_vars: List[Dict[str, str]]) -> Dict[str, str]:

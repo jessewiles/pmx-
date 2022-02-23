@@ -9,6 +9,7 @@ python = "^3.10"
 moment = "^0.12.1"
 requests = "^2.27.1"
 prodict = "^0.8.18"
+Jinja2 = "^3.0.3"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.931"

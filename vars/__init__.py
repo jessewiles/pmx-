@@ -1,4 +1,6 @@
 from collections import defaultdict
+import hashlib
+import hmac
 import json
 import os
 from typing import Any, Dict, List
@@ -71,3 +73,14 @@ def get_er_id(
         return str()
 
     return er["id"]
+
+
+def get_pandadoc_signature(
+    key: str,
+    body: str,
+) -> str:
+    return hmac.new(
+        key.encode(),
+        body.encode(),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
