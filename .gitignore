@@ -3,4 +3,5 @@ __pycache__/
 postman*.json
 e2e.log
 scenes/
+scenes.bak/
 env.*.json

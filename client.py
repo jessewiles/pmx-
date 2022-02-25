@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import time
 from typing import Dict, Optional
 
@@ -25,11 +27,17 @@ logger = init_logging()
 
 class BoostClient:
     def __init__(self, **kwargs):
+        self._namespace: str = "default"
         self.base_url: str = kwargs.get("BOOST_URL", str())
         self.user: str = kwargs.get("BOOST_USER", str())
         self.client_id: str = kwargs.get("CLIENT_ID", str())
         self.client_secret: str = kwargs.get("CLIENT_SECRET", str())
         self.auth_token: Optional[str] = None
+
+        self.save_responses: bool = kwargs.get("save_responses", True)
+        self.original_response_dir: str = kwargs.get("response_dir", str())
+        if self.save_responses and self.response_dir:
+            os.makedirs(self.response_dir, exist_ok=True)
 
         if not self.base_url:
             raise Exception("Missing client auth info: BOOST_URL")
@@ -45,8 +53,22 @@ class BoostClient:
         self.write_headers: Dict[str, str] = dict(self.read_headers)
         self.write_headers["Content-Type"] = "application/vnd.api+json"
 
+    @property
+    def namespace(self):
+        return self._namespace
+
+    @property
+    def response_dir(self):
+        return os.path.join(self.original_response_dir, self.namespace)
+
+    @namespace.setter
+    def namespace(self, val):
+        self._namespace = val
+        if self.save_responses and self.response_dir:
+            os.makedirs(self.response_dir, exist_ok=True)
+
     @classmethod
-    def sleep(cls, seconds=0.5):
+    def sleep(cls, seconds=0.2):
         time.sleep(seconds)
         return
 
@@ -68,30 +90,93 @@ class BoostClient:
         assert response.status_code == 200, response.json()
         self.auth_token = response.json()["access_token"]
 
-    def post(self, endpoint, json):
+    def post(self, endpoint, payload, greek: str = str()):
+        print(f">>> POSTing endpoint: {endpoint} <<<")
         self.sleep()
-        response = requests.post(endpoint, json=json, headers=self.write_headers)
+        response = requests.post(endpoint, json=payload, headers=self.write_headers)
+        self._save_response(response, greek)
+
         return response
 
-    def put(self, endpoint, json):
+    def put(self, endpoint, payload, greek: str = str()):
+        print(f">>> PUTing endpoint: {endpoint} <<<")
         self.sleep()
-        response = requests.put(endpoint, json=json, headers=self.write_headers)
+        response = requests.put(endpoint, json=payload, headers=self.write_headers)
+
+        self._save_response(response, greek)
         return response
 
-    def patch(self, endpoint, json):
+    def patch(self, endpoint, payload, greek: str = str()):
+        print(f">>> PATCHing endpoint: {endpoint} <<<")
         self.sleep()
-        response = requests.patch(endpoint, json=json, headers=self.write_headers)
+        response = requests.patch(endpoint, json=payload, headers=self.write_headers)
+        self._save_response(response, greek)
+
         return response
 
-    def get(self, endpoint):
+    def get(self, endpoint, greek: str = str()):
+        print(f">>> GETing endpoint: {endpoint} <<<")
         self.sleep()
         response = requests.get(endpoint, headers=self.read_headers)
+        self._save_response(response, greek)
+
         return response
 
-    def delete(self, endpoint, json):
+    def delete(self, endpoint, payload, greek: str = str()):
+        print(f">>> DELETEing endpoint: {endpoint} <<<")
+
         self.sleep()
-        if json:
-            response = requests.delete(endpoint, json=json, headers=self.write_headers)
+        if payload:
+            response = requests.delete(
+                endpoint, json=payload, headers=self.write_headers
+            )
         else:
             response = requests.delete(endpoint, headers=self.read_headers)
+        self._save_response(response, greek)
+
         return response
+
+    def poll(self, endpoint, greek: str = str()):
+        print(f">>> POLLing endpoint: {endpoint} <<<")
+        attempt: int = 0
+        limit: int = 20
+        while attempt < limit:
+            print("Polling for docs")
+            time.sleep(3)
+            response = requests.get(endpoint, headers=self.read_headers)
+            self._save_response(response, greek)
+            data = response.json().get("data", [])
+            if len(data) > 0:
+                counter = 1000
+                for item in data:
+                    dl_dir = os.path.join(self.response_dir, "docs")
+                    os.makedirs(dl_dir, exist_ok=True)
+                    dl_path = os.path.join(dl_dir, f"{greek}-{counter}.pdf")
+                    dl_uri: str = item.get("attributes", {}).get("file_url", str())
+                    if dl_uri.startswith("https"):
+                        dl = requests.get(dl_uri)
+                        with open(dl_path, "wb") as writer:
+                            writer.write(dl.content)
+                    counter += 10
+                break
+            attempt += 1
+        return response
+
+    def _save_response(self, response: requests.Response, greek: str):
+
+        if self.save_responses and greek:
+            try:
+                pretty_json = json.loads(response.text)
+            except json.JSONDecodeError:
+                pretty_json = {}
+
+            response_filename = f"{greek}.json"
+            data = pretty_json.get("data", {})
+            type_hint: str = data.get("type") if type(data) is dict else str()
+            if type_hint:
+                response_filename = f"{type_hint}-{response_filename}"
+
+            with open(
+                os.path.join(self.response_dir, response_filename), "w"
+            ) as writer:
+                writer.write(json.dumps(pretty_json, indent=4))

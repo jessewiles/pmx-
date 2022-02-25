@@ -6,6 +6,8 @@ from constants import THIS_DIR, INDENTED, NEWLINE, PREFIX
 from pm.base import E2EBase
 from pm.request import Request
 
+SAVE_RESPONSES = True
+
 
 class Scenario(E2EBase):
     def __init__(
@@ -26,11 +28,18 @@ class Scenario(E2EBase):
                 .replace(")", "_")
                 .replace("-", "_")
             )
+            # reference passed around to all scenarios for tracking module depth
             self.stack: List[str] = stack
             self.stack.append(self.normal_name)
 
+            # snapshot module namespace
+            self.namespace: str = ".".join(self.stack)
+
             self.children: List[E2EBase] = []
             self.requests: List[E2EBase] = []
+
+            self.client_id_key: str = str()
+            self.client_secret_key: str = str()
 
             self.workspace_dir: str = workspace_dir
             self.scenario_dir: str = os.path.join(running_dir, self.normal_name)  # type: ignore
@@ -69,6 +78,9 @@ VARS = {{
 }}
 """
                     )
+            else:
+                with open(os.path.join(self.scenario_dir, "lvars.py"), "w") as lvwriter:
+                    lvwriter.write("""VARS = {}""")
 
             # main driver
             boost_user_key: str = self.route_items(input_dict)
@@ -109,7 +121,7 @@ logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 logger = logging.getLogger("e2e")
 
 TEMPLATE_ENV: Environment = Environment(
-    loader=PackageLoader("{'.'.join(self.stack)}", package_path="data"),
+    loader=PackageLoader("{self.namespace}", package_path="data"),
     autoescape=select_autoescape(["json"]),
 )
 
@@ -117,6 +129,10 @@ THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
 CLOSET_VARS = dict(load_vars())
 {NEWLINE.join(closet_imports)}
 CLOSET_VARS["BOOST_USER"] = CLOSET_VARS["{boost_user_key}"]
+CLOSET_VARS["CLIENT_ID"] = CLOSET_VARS.get("{self.client_id_key}", str())
+CLOSET_VARS["CLIENT_SECRET"] = CLOSET_VARS.get("{self.client_secret_key}", str())
+CLOSET_VARS["save_responses"] = {SAVE_RESPONSES}
+CLOSET_VARS["response_dir"] = os.path.join(THIS_DIR, "responses")
 
 CLIENT = BoostClient(**CLOSET_VARS)
 
@@ -127,18 +143,47 @@ CLIENT = BoostClient(**CLOSET_VARS)
                         req.write_request(writer)
                     writer.write(
                         """
-# Running scenarios stubby
-if __name__ == "__main__":
+# tous is the `everything` fn used by run.py at the top of the module
+def tous():
 """
                     )
                     for req in self.requests:
-                        writer.write(f"    {req.normal_name}_{req.greek}()\n")
+                        writer.write(
+                            f"    {req.normal_name}_{req.greek}()  # {req.name}\n"
+                        )
+                    writer.write(
+                        """
+# Aliases
+# for example
+# def make_policy():
+#     new_quote_alpha()
+#     policy_from_quote_beta()
+
+
+
+# Define scenarios using aliases
+# for example
+# def happy_path():
+#     make_policy()
+#     new_eq()
+#     endorse_eq()
+#     cancel_policy()
+
+"""
+                    )
+                    writer.write(
+                        """
+if __name__ == "__main__":
+    tous()
+"""
+                    )
+
             else:
                 # TODO? list of dirs to remove?
                 pass  # os.remove(self.data_dir)
 
             # pop here?
-            self.stack.pop()
+            popped: str = self.stack.pop()
 
     def __repr__(self) -> str:
         return (
@@ -173,6 +218,23 @@ if __name__ == "__main__":
                     result = req.boost_user_key
                 # Don't write authentication steps since the client handles this
                 if "auth/oauth2/token" in req.url:
+                    data_list: List[Dict[str, str]] = (
+                        item.get("request").get("body", {}).get("urlencoded", [])
+                    )
+                    for item in data_list:
+                        if item.get("key") == "client_id":
+                            self.client_id_key = (
+                                item.get("value")
+                                .replace("{", str())
+                                .replace("}", str())
+                            )
+                        elif item.get("key") == "client_secret":
+                            self.client_secret_key = (
+                                item.get("value")
+                                .replace("{", str())
+                                .replace("}", str())
+                            )
+
                     continue
 
                 self.children.append(req)

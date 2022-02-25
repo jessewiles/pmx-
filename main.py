@@ -6,6 +6,8 @@ import subprocess
 import sys
 from typing import Any, Dict, List, Optional
 
+from constants import NEWLINE
+from pm.request import Request
 from pm.scenario import Scenario
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -14,11 +16,7 @@ logger = logging.getLogger("e2e")
 
 
 THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
-NEWLINE: str = "\n"
-PREFIX: str = "  "
-INDENTED: str = f"{NEWLINE}    "
 WORKSPACE_DIR: str = ""
-WRITE_OUT_EVENTS: bool = False
 
 
 def setup_workspace():
@@ -37,22 +35,39 @@ def setup_workspace():
     subprocess.run(["fish", "./scripts/get_local_env.fish"], cwd=THIS_DIR)
     subprocess.run(["fish", "./scripts/get_smoke_collection.fish"], cwd=THIS_DIR)
 
+
+def post_processing(root_scenario: Scenario) -> None:
     with open(os.path.join(WORKSPACE_DIR, "run.py"), "w") as writer:
+
+        def _recurse_scenarios(a_scenario: Scenario, ns_list: Dict[str, bool]) -> None:
+            ns_list[a_scenario.namespace] = True
+            for child in a_scenario.children:
+                if type(child) is Scenario:
+                    _recurse_scenarios(child, ns_list)
+
+        namespaces: Dict[str, bool] = {}
+        _recurse_scenarios(root_scenario, namespaces)
+
+        import_strings: List[str] = [
+            f"from {ns}.scenario import tous as {ns.replace('.', '_')}"
+            for ns in namespaces.keys()
+        ]
+        import_fns: List[str] = [f"{ns.replace('.', '_')}" for ns in namespaces.keys()]
+
         writer.write(
-            """\
+            f"""\
 import os
-from vars import SafeArgs, load_vars
+from concurrent import futures
 
+{NEWLINE.join(import_strings)}
 
-THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
-NEWLINE: str = "\\n"
-PREFIX: str = "  "
-ENV: str = "local"
-ALL_THE_VARS: SafeArgs = load_vars(os.path.join(THIS_DIR, "vars", f"env.{ENV}.json"))
+if __name__ == "__main__":
+    with futures.ThreadPoolExecutor(max_workers=2) as executor:
+        tasks = [executor.submit(job) for job in ({', '.join(import_fns)})]
+        for f in futures.as_completed(tasks):
+            print("A thing is done")
 """
         )
-    with open(os.path.join(THIS_DIR, "vars", "pandadoc.json.tmpl"), "r") as reader:
-        PANDADOC_MESSASGE = reader.read()
 
 
 def extract_env(input_vars: List[Dict[str, str]]) -> Dict[str, str]:
@@ -76,15 +91,10 @@ GLOBAL_VARS = {json.dumps(env, indent="    ", separators=(",", ":"), sort_keys=T
 """
             )
 
-        _ = """
-        other_vars: Dict[str, str] = extract_event_vars(
-            raw.get("event", [{}])[0].get("script", {}).get("exec", [])
-        )
-        ALL_THE_VARS.update(other_vars)
-        """
-
         for item in raw.get("item", []):
-            Scenario(item, WORKSPACE_DIR, WORKSPACE_DIR, [])
+            root_scenario = Scenario(item, WORKSPACE_DIR, WORKSPACE_DIR, [])
+
+        post_processing(root_scenario)
 
 
 if __name__ == "__main__":

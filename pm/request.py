@@ -137,9 +137,12 @@ class Request(E2EBase):
     )
 """
         writer.write(
-            f"""def {self.normal_name}_{self.greek}():
-    print("*** Beginning request: {self.normal_name}_{self.greek} ***")
+            f"""\
+def {self.normal_name}_{self.greek}():
     \"\"\" {self.method} - {self.name} \"\"\"
+    print()
+    print("-------------------------------------------")
+    print("*** Beginning request: {self.name} ***")
 """
         )
         if WRITE_OUT_EVENTS:
@@ -167,9 +170,10 @@ class Request(E2EBase):
             )
         writer.write(
             f"""\
+    CLOSET_VARS["BOOST_USER"] = CLOSET_VARS["{self.boost_user_key}"]
     {INDENTED.join(self.pre_script_event_vars)}
-{f"{NEWLINE}{payload}{NEWLINE}    " if payload else "    "}response = getattr(CLIENT, "{self.method.lower()}")(
-        "{furl}".format_map(CLOSET_VARS),{NEWLINE if payload else str()}{"        json=payload," if payload else str()}
+{f"{NEWLINE}{payload}{NEWLINE}    " if payload else "    "}response = getattr(CLIENT, "{'poll' if '/documents' in self.url else self.method.lower()}")(
+        "{furl}".format_map(CLOSET_VARS),{NEWLINE if payload else str()}{"        payload," if payload else str()} greek="{self.greek}",
     )
 """
         )
@@ -181,9 +185,11 @@ class Request(E2EBase):
             )
         writer.write(
             f"""\
-    print("*** Verifying: {self.normal_name}_{self.greek} results ***")
-    print(str())
+    print("^^^ Verifying: {self.normal_name}_{self.greek} results ^^^") 
+    print()
     {INDENTED.join(self.test_script_event_vars)}
+    print("-------------------------------------------")
+    print()
 
 
 """

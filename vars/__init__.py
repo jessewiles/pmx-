@@ -84,3 +84,23 @@ def get_pandadoc_signature(
         body.encode(),
         digestmod=hashlib.sha256,
     ).hexdigest()
+
+
+def get_coverage_by_id(
+    included: List[Dict[str, Any]],
+    id_to_lookup: str,
+) -> str:
+    try:
+        coverage = next(
+            filter(
+                lambda i: i["type"] == "endorsement_quote_coverage"
+                and i["relationships"]["product_coverage"]["data"]["id"]
+                == id_to_lookup,
+                included,
+            )
+        )
+    except StopIteration:
+        return str()
+
+    coverage = Prodict(**coverage)
+    return coverage.id
