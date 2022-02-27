@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import List, Sequence
 
 THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
 NEWLINE: str = "\n"
@@ -8,7 +8,6 @@ INDENTED: str = f"{NEWLINE}    "
 PANDADOC_MESSASGE: str = str()
 with open(os.path.join(THIS_DIR, "vars", "pandadoc.json.tmpl"), "r") as reader:
     PANDADOC_MESSASGE = reader.read()
-
 
 GREEK_LETTERS: List[str] = [
     "alpha",
@@ -37,3 +36,7 @@ GREEK_LETTERS: List[str] = [
     "omega",
 ]
 GREEK_LEN: int = len(GREEK_LETTERS)
+
+# export stuff
+EXPORT_DIR_EXCLUDES: Sequence[str] = ("__pycache__", "responses", ".git", ".mypy_cache")
+EXPORT_FILE_EXCLUDES: Sequence[str] = ("collection.json", "e2e.log", ".DS_Store")

@@ -1,0 +1,58 @@
+import os
+import sys
+# HACK to allow module to run independently
+sys.path.insert(0, {{pypath_prefix}}os.path.abspath(__file__){{pypath_suffix}})
+
+import inspect
+import json
+import sys
+import time
+
+import click
+import moment
+from prodict import Prodict
+from jinja2 import Environment, PackageLoader, select_autoescape
+
+from client import BoostClient
+from vars import (
+    get_entity_id,
+    get_er_id,
+    get_pandadoc_signature,
+    get_stack_path,
+    load_vars,
+)
+{{var_imports}}
+
+TEMPLATE_ENV: Environment = Environment(
+    loader=PackageLoader("{{namespace}}", package_path="data"),
+    autoescape=select_autoescape(["json"]),
+)
+
+NAMESPACE: str = "{{ namespace }}"
+THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
+CLOSET_VARS = dict(load_vars())
+{{ closet_imports }}
+CLOSET_VARS["BOOST_USER"] = CLOSET_VARS["{{ boost_user_key }}"]
+CLOSET_VARS["CLIENT_ID"] = CLOSET_VARS.get("{{ client_id_key }}", str())
+CLOSET_VARS["CLIENT_SECRET"] = CLOSET_VARS.get("{{ client_secret_key }}", str())
+CLOSET_VARS["save_responses"] = {{ save_responses }}
+CLOSET_VARS["response_dir"] = os.path.join(THIS_DIR, "responses")
+
+CLIENT = BoostClient(**CLOSET_VARS)
+
+{% for request in requests %}
+{{ request.write_request() }}
+{% endfor %}
+
+
+# tous is the `everything` fn used by run.py at the top of the module
+def tous():
+{% for request in requests %}
+    {{ request.normal_name }}_{{ request.greek }}()  # {{ request.name -}}
+{% endfor %}
+
+    return "{{ scenario_name }}"
+
+
+if __name__ == "__main__":
+    tous()

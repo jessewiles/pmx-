@@ -1,0 +1,34 @@
+def {{ normal_name }}_{{ greek }}():
+    """ {{ method }} - {{ name }} """
+    click.secho()
+    click.secho(">>> ---------------------------------------")
+    click.secho(f">>> Namespace: {NAMESPACE}", fg="blue")
+    click.secho(f">>> Scenario: {get_stack_path()} <<<", fg="cyan")
+    click.secho(">>> Request: {{ name }}", fg="green")
+{% if write_out_events %}
+    """ {{ pre_script_raw }} """
+{% endif %}
+{%- if is_pandadoc_req %}
+    CLOSET_VARS["quote_type"] = "{{ quote_type }}"
+    CLOSET_VARS["document_id"] = "{{ doc_id }}"
+{% endif %}
+{%- if boost_user_key %}
+    CLOSET_VARS["BOOST_USER"] = CLOSET_VARS["{{ boost_user_key }}"]
+{% endif %}
+    {{ pre_script_event_vars }}
+
+{%- if read_payload_data %}
+{{ read_payload_data }}
+{% endif %}
+    response = getattr(CLIENT, "{{ "poll" if "/documents" in furl else method|lower }}")(
+        "{{ furl }}".format_map(CLOSET_VARS),
+{% if read_payload_data %}        payload,{% endif %}
+        greek="{{ greek }}"
+    )
+{% if write_out_events %}
+    """ {{ test_script_raw }} """
+{% endif %}
+    click.secho(">>> Verifying: {{ normal_name }}_{{ greek }} results <<<", fg="magenta") 
+    {{ test_script_event_vars }}
+    click.secho(">>> ---------------------------------------")
+    click.secho()

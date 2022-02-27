@@ -1,3 +1,4 @@
+from collections import defaultdict
 import json
 import logging
 import os
@@ -5,12 +6,15 @@ import re
 import sys
 from typing import Any, Dict, List, Optional
 
+from jinja2 import Environment, Template
+
+from fragments import READ_PAYLOAD_DATA, READ_PAYLOAD_DATA_PANDADOC
 from pm.base import E2EBase
 from constants import (
     GREEK_LEN,
     GREEK_LETTERS,
-    PREFIX,
     INDENTED,
+    PREFIX,
     NEWLINE,
     PANDADOC_MESSASGE,
 )
@@ -27,13 +31,16 @@ class Request(E2EBase):
         self: "Request",
         input_dict: Dict[str, Any],
         stack: List[str],
+        template_env: Environment,
         data_dir: str = str(),
         level: int = 0,
         count: int = 0,
     ) -> None:
+        self.input_dict: Dict[str, Any] = input_dict
         self.level: int = level
+        self.count: int = count
         self.stack = stack
-        self.name: Optional[str] = input_dict.get("name")
+        self.name: Optional[str] = self.input_dict.get("name")
         self.normal_name: str = (
             self.name.lower()
             .replace(" ", "_")
@@ -41,61 +48,81 @@ class Request(E2EBase):
             .replace(")", "_")
             .replace("-", "_")
         )
-        self.method: str = input_dict.get("request", {}).get("method", "GET")
+        self.method: str = self.input_dict.get("request", {}).get("method", "GET")
 
         self.data_dir: str = data_dir
         self.url: str = (
-            input_dict.get("request", {})
+            self.input_dict.get("request", {})
             .get("url", {})
             .get("raw", "")
             .replace("{{", "{")
             .replace("}}", "}")
         )
-        self.payload: str = input_dict.get("request", {}).get("body", {}).get("raw", "")
-        self.greek: str = str()
-        if count >= GREEK_LEN:
-            n: int = int(count / GREEK_LEN)
-            item: str = GREEK_LETTERS[count % GREEK_LEN]
-            self.greek = "_".join([item for _ in range(n)])
-        else:
-            self.greek = GREEK_LETTERS[count]
+        self.payload: str = (
+            self.input_dict.get("request", {}).get("body", {}).get("raw", "")
+        )
+        self._greek: str = str()
+        self._boost_user_key: str = str()
 
         try:
             self.body: Dict[str, Any] = json.loads(self.payload)
         except json.decoder.JSONDecodeError:
             self.body = {}
 
-        self.is_pandadoc_req: bool = "pandadoc" in self.normal_name
+        self.events: List[Dict[str, Any]] = self.input_dict.get("event", [str()])
 
+        self.template: Template = template_env.get_template("requests.py.tmpl")
+
+        # stuff related to script parsing
+        self._doc_id: str = str()
+        self._quote_type: str = str()
         self.pre_script_raw: str = str()
         self.pre_script: List[str] = []
         self.pre_script_event_vars: List[str] = []
+        self.parse_pre_event()
 
         self.test_script_raw: str = str()
         self.test_script: List[str] = []
         self.test_script_event_vars: List[str] = []
+        self.parse_test_event()
 
-        events: List[Dict[str, Any]] = input_dict.get("event", [str()])
+        self.is_pandadoc_req: bool = "pandadoc" in self.normal_name
 
+    def parse_pre_event(self):
         pre_event: Dict[str, Any] = {}
         try:
             pre_event = next(
                 filter(
                     lambda i: type(i) is dict and i.get("listen") == "prerequest",
-                    events,
+                    self.events,
                 )
             )
         except StopIteration:
             pass
+
         if pre_event:
             self.pre_script = pre_event.get("script", {}).get("exec", [str()])
             self.pre_script_raw = "\n    ".join(self.pre_script)
             self.pre_script_event_vars = self.extract_event_vars(self.pre_script)
 
+            self._doc_id = (
+                "cbyMyQhJgYDu9SeU5zTc5n"
+                if "pandadoc_document_id" in self.pre_script_raw
+                else "iE7DToRRKNnYXp2DWYd458"
+            )
+            self._quote_type = (
+                "endorsement_quote"
+                if "endorsement_quote" in self.pre_script_raw
+                else "quote"
+            )
+
+    def parse_test_event(self):
         test_event: Dict[str, Any] = {}
         try:
             test_event = next(
-                filter(lambda i: type(i) is dict and i.get("listen") == "test", events)
+                filter(
+                    lambda i: type(i) is dict and i.get("listen") == "test", self.events
+                )
             )
         except StopIteration:
             pass
@@ -104,96 +131,71 @@ class Request(E2EBase):
             self.test_script_raw = "\n    ".join(self.test_script)
             self.test_script_event_vars = self.extract_event_vars(self.test_script)
 
-        self.boost_user_key: str = str()
-        header_list: List[Dict[str, str]] = input_dict.get("request", {}).get(
-            "header", []
-        )
-        for item in header_list:
-            if item["key"] == "BOOST-USER":
-                self.boost_user_key = item["value"].replace("{", "").replace("}", "")
-
     def __repr__(self) -> str:
         return (
             f"{NEWLINE}{PREFIX * self.level}{{type: Request, name: {self.name},"
             f"method: {self.method}, url: {self.url}, body: {self.body.keys()}}}"
         )
 
-    def write_request(self, writer) -> None:
-        furl: str = self.url
+    @property
+    def greek(self):
+        if not self._greek:
+            if self.count >= GREEK_LEN:
+                n: int = int(self.count / GREEK_LEN)
+                item: str = GREEK_LETTERS[count % GREEK_LEN]
+                self._greek = "_".join([item for _ in range(n)])
+            else:
+                self._greek = GREEK_LETTERS[self.count]
+        return self._greek
 
-        payload: Optional[str] = None
+    @property
+    def boost_user_key(self):
+        if not self._boost_user_key:
+            header_list: List[Dict[str, str]] = self.input_dict.get("request", {}).get(
+                "header", []
+            )
+            for item in header_list:
+                if item["key"] == "BOOST-USER":
+                    self._boost_user_key = (
+                        item["value"].replace("{", "").replace("}", "")
+                    )
+        return self._boost_user_key
+
+    @property
+    def read_payload_data(self) -> str:
+        result = str()
         if self.method in ["POST", "PATCH", "PUT", "DELETE"]:
-            payload = f"""\
-    payload = str()
-    template = TEMPLATE_ENV.get_template("{self.greek}.json")
-    content = template.render(**CLOSET_VARS)
-    if content:
-        payload = json.loads(content)
-"""
+            result = READ_PAYLOAD_DATA.format(**{"greek": self.greek})
             if self.is_pandadoc_req:
-                payload += """\
-    CLOSET_VARS["pandadoc_signature"] = get_pandadoc_signature(
-        CLOSET_VARS["pandadoc_webhook_key"], json.dumps(payload)
-    )
-"""
-        writer.write(
-            f"""\
-def {self.normal_name}_{self.greek}():
-    \"\"\" {self.method} - {self.name} \"\"\"
-    print()
-    print("-------------------------------------------")
-    print("*** Beginning request: {self.name} ***")
-"""
-        )
-        if WRITE_OUT_EVENTS:
-            writer.write(
-                f"""\
-\"\"\" {self.pre_script_raw} \"\"\"
-"""
-            )
-        if self.is_pandadoc_req:
-            doc_id: str = (
-                "cbyMyQhJgYDu9SeU5zTc5n"
-                if "pandadoc_document_id" in self.pre_script_raw
-                else "iE7DToRRKNnYXp2DWYd458"
-            )
-            quote_type: str = (
-                "endorsement_quote"
-                if "endorsement_quote" in self.pre_script_raw
-                else "quote"
-            )
-            writer.write(
-                f"""
-    CLOSET_VARS["quote_type"] = "{quote_type}"
-    CLOSET_VARS["document_id"] = "{doc_id}"
-"""
-            )
-        writer.write(
-            f"""\
-    CLOSET_VARS["BOOST_USER"] = CLOSET_VARS["{self.boost_user_key}"]
-    {INDENTED.join(self.pre_script_event_vars)}
-{f"{NEWLINE}{payload}{NEWLINE}    " if payload else "    "}response = getattr(CLIENT, "{'poll' if '/documents' in self.url else self.method.lower()}")(
-        "{furl}".format_map(CLOSET_VARS),{NEWLINE if payload else str()}{"        payload," if payload else str()} greek="{self.greek}",
-    )
-"""
-        )
-        if WRITE_OUT_EVENTS:
-            writer.write(
-                f"""\
-\"\"\" {self.test_script_raw} \"\"\"
-"""
-            )
-        writer.write(
-            f"""\
-    print("^^^ Verifying: {self.normal_name}_{self.greek} results ^^^") 
-    print()
-    {INDENTED.join(self.test_script_event_vars)}
-    print("-------------------------------------------")
-    print()
+                result += READ_PAYLOAD_DATA_PANDADOC
+        return result
 
+    def write_request(self) -> str:
+        self.write_payload()
 
-"""
+        render_args: defaultdict = defaultdict(str)
+        render_args.update(
+            {
+                "boost_user_key": self.boost_user_key,
+                "doc_id": self._doc_id,
+                "furl": self.url,
+                "greek": self.greek,
+                "is_pandadoc_req": self.is_pandadoc_req,
+                "method": self.method,
+                "name": self.name,
+                "normal_name": self.normal_name,
+                "pre_script_event_vars": INDENTED.join(self.pre_script_event_vars),
+                "pre_script_raw": self.pre_script_raw,
+                "quote_type": self._quote_type,
+                "read_payload_data": self.read_payload_data,
+                "test_script_raw": self.test_script_raw,
+                "test_script_event_vars": INDENTED.join(self.test_script_event_vars),
+                "write_out_events": WRITE_OUT_EVENTS,
+            }
         )
+        return self.template.render(**render_args)
+
+    def write_payload(self):
         if self.method in ["POST", "PATCH", "PUT", "DELETE"]:
             with open(os.path.join(self.data_dir, f"{self.greek}.json"), "w") as writer:
                 if "pandadoc_message" in self.payload:

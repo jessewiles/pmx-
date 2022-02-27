@@ -1,73 +1,95 @@
 import json
-import logging
 import os
+from pipes import Template
 import shutil
 import subprocess
 import sys
+from zipfile import ZipFile
 from typing import Any, Dict, List, Optional
 
-from constants import NEWLINE
-from pm.request import Request
-from pm.scenario import Scenario
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-
-logger = logging.getLogger("e2e")
+from constants import (
+    NEWLINE,
+    EXPORT_DIR_EXCLUDES,
+    EXPORT_FILE_EXCLUDES,
+)
+from fragments import (
+    EXPORT_README,
+    EXPORT_REQUIREMENTS,
+)
+from pm.collection import Collection
 
 
 THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE_DIR: str = ""
+TEMPLATE_ENV: Environment = Environment(
+    loader=FileSystemLoader("templates"),
+    autoescape=select_autoescape(["json"]),
+)
 
 
 def setup_workspace():
     global WORKSPACE_DIR
 
-    WORKSPACE_DIR = os.path.join(THIS_DIR, "scenes")
+    if "-workspace" in sys.argv:
+        WORKSPACE_DIR = os.path.abspath(sys.argv[-1])
+    else:
+        WORKSPACE_DIR = os.path.join(THIS_DIR, "scenes")
     os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
     shutil.copyfile(
         os.path.join(THIS_DIR, "client.py"), os.path.join(WORKSPACE_DIR, "client.py")
     )
 
-    shutil.copytree(os.path.join(THIS_DIR, "vars"), os.path.join(WORKSPACE_DIR, "vars"))
+    shutil.copytree(
+        os.path.join(THIS_DIR, "vars"),
+        os.path.join(WORKSPACE_DIR, "vars"),
+        dirs_exist_ok=True,
+    )
 
     # TODO: DO this in python?
-    subprocess.run(["fish", "./scripts/get_local_env.fish"], cwd=THIS_DIR)
-    subprocess.run(["fish", "./scripts/get_smoke_collection.fish"], cwd=THIS_DIR)
+    run_env: Dict[str, str] = dict(os.environ)
+    run_env["E2E_WORKSPACE_DIR"] = WORKSPACE_DIR
+    subprocess.run(["fish", "./scripts/get_local_env.fish"], cwd=THIS_DIR, env=run_env)
+    subprocess.run(
+        ["fish", "./scripts/get_smoke_collection.fish"], cwd=THIS_DIR, env=run_env
+    )
 
 
-def post_processing(root_scenario: Scenario) -> None:
-    with open(os.path.join(WORKSPACE_DIR, "run.py"), "w") as writer:
+def post_processing(root_collection: Optional[Collection]) -> None:
+    if root_collection:
+        with open(os.path.join(WORKSPACE_DIR, "run.py"), "w") as writer:
 
-        def _recurse_scenarios(a_scenario: Scenario, ns_list: Dict[str, bool]) -> None:
-            ns_list[a_scenario.namespace] = True
-            for child in a_scenario.children:
-                if type(child) is Scenario:
-                    _recurse_scenarios(child, ns_list)
+            def _recurse_collections(
+                coll: Collection, ns_list: Dict[str, bool]
+            ) -> None:
+                ns_list[coll.namespace] = coll
+                for child in coll.children:
+                    if type(child) is Collection:
+                        _recurse_collections(child, ns_list)
 
-        namespaces: Dict[str, bool] = {}
-        _recurse_scenarios(root_scenario, namespaces)
+            namespaces: Dict[str, Collection] = {}
+            _recurse_collections(root_collection, namespaces)
 
-        import_strings: List[str] = [
-            f"from {ns}.scenario import tous as {ns.replace('.', '_')}"
-            for ns in namespaces.keys()
-        ]
-        import_fns: List[str] = [f"{ns.replace('.', '_')}" for ns in namespaces.keys()]
-
-        writer.write(
-            f"""\
-import os
-from concurrent import futures
-
-{NEWLINE.join(import_strings)}
-
-if __name__ == "__main__":
-    with futures.ThreadPoolExecutor(max_workers=2) as executor:
-        tasks = [executor.submit(job) for job in ({', '.join(import_fns)})]
-        for f in futures.as_completed(tasks):
-            print("A thing is done")
-"""
-        )
+            render_args: Dict[str, str] = {
+                "import_strings": NEWLINE.join(
+                    [
+                        f"from {ns}.scenarios import tous as {ns.replace('.', '_')}"
+                        for ns in namespaces.keys()
+                        if len(namespaces[ns].requests) > 0
+                    ]
+                ),
+                "import_fns": ", ".join(
+                    [
+                        f"{ns.replace('.', '_')}"
+                        for ns in namespaces.keys()
+                        if len(namespaces[ns].requests) > 0
+                    ]
+                ),
+            }
+            template: Template = TEMPLATE_ENV.get_template("run.py.tmpl")
+            writer.write(template.render(**render_args))
 
 
 def extract_env(input_vars: List[Dict[str, str]]) -> Dict[str, str]:
@@ -86,16 +108,50 @@ def main():
         env: Dict[str, str] = extract_env(raw.get("variable", []))
         with open(os.path.join(WORKSPACE_DIR, "vars", "global_vars.py"), "w") as writer:
             writer.write(
-                f"""\
-GLOBAL_VARS = {json.dumps(env, indent="    ", separators=(",", ":"), sort_keys=True)}
-"""
+                f"""GLOBAL_VARS = {json.dumps(env, indent="    ", separators=(",", ":"), sort_keys=True)}"""
             )
 
+        root_collection: Optional[Collection] = None
         for item in raw.get("item", []):
-            root_scenario = Scenario(item, WORKSPACE_DIR, WORKSPACE_DIR, [])
+            root_collection = Collection(
+                item, WORKSPACE_DIR, WORKSPACE_DIR, [], TEMPLATE_ENV
+            )
+            root_collection.write_scenario()
 
-        post_processing(root_scenario)
+        post_processing(root_collection)
+
+
+def export():
+    """Export a scenario for sharing"""
+    export_arg_index: int = sys.argv.index("-export")
+    if len(sys.argv) == (export_arg_index - 1):
+        export_dir: str = os.path.abspath("./scenes")
+    else:
+        export_dir: str = os.path.abspath(sys.argv[export_arg_index + 1])
+    if not os.path.isdir(export_dir):
+        print(f"Can't find dir: {export_dir}. bugging out")
+        sys.exit(1)
+
+    bn: str = os.path.basename(export_dir)
+    with ZipFile(f"{bn}.zip", "w") as ex_zip:
+        ex_zip.writestr(os.path.join(bn, "README.md"), EXPORT_README)
+        ex_zip.writestr(os.path.join(bn, "requirements.txt"), EXPORT_REQUIREMENTS)
+
+        for root, _, files in os.walk(export_dir):
+            for afile in files:
+                if all([i not in root for i in EXPORT_DIR_EXCLUDES]):
+                    if all([i != afile for i in EXPORT_FILE_EXCLUDES]):
+                        fullpath = os.path.join(root, afile)
+                        ex_zip.write(
+                            fullpath,
+                            arcname=fullpath.replace(
+                                os.path.dirname(export_dir), str()
+                            )[1:],
+                        )
 
 
 if __name__ == "__main__":
-    main()
+    if "-export" in sys.argv:
+        export()
+    else:
+        main()

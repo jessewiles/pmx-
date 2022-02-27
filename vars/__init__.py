@@ -1,6 +1,7 @@
 from collections import defaultdict
 import hashlib
 import hmac
+import inspect
 import json
 import os
 from typing import Any, Dict, List
@@ -104,3 +105,8 @@ def get_coverage_by_id(
 
     coverage = Prodict(**coverage)
     return coverage.id
+
+
+def get_stack_path():
+    stack = list(reversed([f.function for f in inspect.stack()]))[1:-3]
+    return ".".join(stack)

@@ -1,0 +1,15 @@
+import os
+import shutil
+from concurrent import futures
+
+{{ import_strings }}
+
+if __name__ == "__main__":
+    for root, dirs, _ in os.walk(os.path.dirname(__file__)):
+        for dir in dirs:
+            if dir == "responses":
+                shutil.rmtree(dir, ignore_errors=True)
+    with futures.ThreadPoolExecutor(max_workers=2) as executor:
+        tasks = [executor.submit(job) for job in ({{ import_fns }})]
+        for f in futures.as_completed(tasks):
+            print(f"Completed something: result: {f.result()}")

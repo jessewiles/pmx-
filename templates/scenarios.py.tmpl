@@ -1,0 +1,25 @@
+import os
+import sys
+# HACK to allow module to run independently
+sys.path.insert(0, {{pypath_prefix}}os.path.abspath(__file__){{pypath_suffix}})
+
+from {{ namespace }}.base import *
+
+# Aliases
+# for example
+# def make_policy():
+#     new_quote_alpha()
+#     policy_from_quote_beta()
+
+
+# Define scenarios using aliases
+# for example
+# def happy_path():
+#     make_policy()
+#     new_eq()
+#     endorse_eq()
+#     cancel_policy()
+
+
+if __name__ == "__main__":
+    tous()
