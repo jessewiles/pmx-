@@ -1,4 +1,5 @@
 scenes/
+dist/
 __pycache__/
 postman*.json
 e2e.log

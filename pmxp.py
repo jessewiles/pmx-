@@ -5,8 +5,9 @@ import shutil
 import subprocess
 import sys
 from zipfile import ZipFile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
+import click
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 
 from constants import (
@@ -101,7 +102,14 @@ def extract_env(input_vars: List[Dict[str, str]]) -> Dict[str, str]:
     return result
 
 
-def main():
+@click.group()
+def cli():
+    pass
+
+
+@click.command()
+def export():
+    """Export postman data to python"""
     setup_workspace()
 
     with open(os.path.join(WORKSPACE_DIR, "collection.json"), "r") as reader:
@@ -124,8 +132,10 @@ def main():
         post_processing(root_collections)
 
 
-def export():
-    """Export a scenario for sharing"""
+@click.command()
+@click.option("-d", "--dir", default="./scenes", help="Directory to archive")
+def archive():
+    """Make a ready-to-run  archive for sharing"""
     export_arg_index: int = sys.argv.index("-export")
     if len(sys.argv) == (export_arg_index - 1):
         export_dir: str = os.path.abspath("./scenes")
@@ -153,8 +163,8 @@ def export():
                         )
 
 
+cli.add_command(export)
+cli.add_command(archive)
+
 if __name__ == "__main__":
-    if "-export" in sys.argv:
-        export()
-    else:
-        main()
+    cli()
