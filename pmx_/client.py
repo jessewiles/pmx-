@@ -1,9 +1,9 @@
-from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import os
+import threading
 import time
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -121,8 +121,14 @@ class BoostClient:
         response = requests.get(endpoint, headers=self.read_headers)
         self._save_response(response, greek)
         if "/documents" in endpoint:
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                executor.submit(self.poll, endpoint, greek)
+            threading.Thread(
+                target=self.poll,
+                name=f"get_docs_{time.time()}",
+                args=(
+                    endpoint,
+                    greek,
+                ),
+            ).start()
 
         return response
 
@@ -142,11 +148,10 @@ class BoostClient:
 
     def poll(self, endpoint, greek: str = str()):
         attempt: int = 0
-        limit: int = 10
+        limit: int = 15
         while attempt < limit:
             time.sleep(2)
             response = requests.get(endpoint, headers=self.read_headers)
-            self._save_response(response, greek)
             data = response.json().get("data", [])
             if len(data) > 0:
                 counter = 1000
@@ -163,6 +168,7 @@ class BoostClient:
                 print(f"Completed downloads for endpoint: {endpoint}")
                 break
             attempt += 1
+        return
 
     def _save_response(self, response: requests.Response, greek: str):
 
@@ -173,8 +179,8 @@ class BoostClient:
                 pretty_json = {}
 
             response_filename = f"{greek}.json"
-            data = pretty_json.get("data", {})
-            type_hint: str = data.get("type") if type(data) is dict else str()
+            data: Dict[str, Any] = pretty_json.get("data", {})
+            type_hint: str = data.get("type", str()) if type(data) is dict else str()
             if type_hint:
                 response_filename = f"{type_hint}-{response_filename}"
 

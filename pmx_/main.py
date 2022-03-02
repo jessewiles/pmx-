@@ -24,20 +24,17 @@ from pmx_.pm.collection import Collection
 logging.getLogger("blib2to3").setLevel(logging.ERROR)
 
 THIS_DIR: str = os.path.dirname(os.path.abspath(__file__))
-WORKSPACE_DIR: str = ""
+WORKSPACE_DIR: str = str()
 TEMPLATE_ENV: Environment = Environment(
-    loader=FileSystemLoader("templates"),
+    loader=FileSystemLoader(os.path.join(THIS_DIR, "templates")),
     autoescape=select_autoescape(["json"]),
 )
 
 
-def setup_workspace():
+def setup_workspace(dir: str, collection: str, environment_id: str):
     global WORKSPACE_DIR
 
-    if "-workspace" in sys.argv:
-        WORKSPACE_DIR = os.path.abspath(sys.argv[-1])
-    else:
-        WORKSPACE_DIR = os.path.join(THIS_DIR, "scenes")
+    WORKSPACE_DIR = os.path.abspath(dir)
     os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
     shutil.copyfile(
@@ -108,9 +105,37 @@ def cli():
 
 
 @click.command()
-def export():
+@click.option(
+    "-c",
+    "--collection-id",
+    type=str,
+    help="The postman collection id to export",
+)
+@click.option(
+    "-e",
+    "--environment-id",
+    type=str,
+    envvar="PMX_ENVIRONMENT_ID",
+    help="The postman environment id to export",
+)
+@click.option(
+    "-c",
+    "--collection-id",
+    type=str,
+    envvar="PMX_COLLECTION_ID",
+    help="The postman collection id to export",
+)
+@click.option(
+    "-d",
+    "--dir",
+    type=str,
+    envvar="PMX_WORKSPACE_DIR",
+    default="./scenes",
+    help="Target directory for generated code",
+)
+def export(dir: str, collection_id: str, environment_id: str):
     """Export postman data to python"""
-    setup_workspace()
+    setup_workspace(dir, collection_id, environment_id)
 
     with open(os.path.join(WORKSPACE_DIR, "collection.json"), "r") as reader:
         raw: Dict[str, Any] = json.load(reader).get("collection", {})
@@ -134,13 +159,9 @@ def export():
 
 @click.command()
 @click.option("-d", "--dir", default="./scenes", help="Directory to archive")
-def archive():
+def archive(dir):
     """Make a ready-to-run  archive for sharing"""
-    export_arg_index: int = sys.argv.index("-export")
-    if len(sys.argv) == (export_arg_index - 1):
-        export_dir: str = os.path.abspath("./scenes")
-    else:
-        export_dir: str = os.path.abspath(sys.argv[export_arg_index + 1])
+    export_dir: str = os.path.abspath(dir)
     if not os.path.isdir(export_dir):
         print(f"Can't find dir: {export_dir}. bugging out")
         sys.exit(1)
@@ -167,4 +188,4 @@ cli.add_command(export)
 cli.add_command(archive)
 
 if __name__ == "__main__":
-    cli()
+    cli(auto_envvar_prefix="PMX")
