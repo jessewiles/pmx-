@@ -10,16 +10,16 @@ from typing import Any, Dict, List
 import click
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 
-from constants import (
+from pmx_.constants import (
     NEWLINE,
     EXPORT_DIR_EXCLUDES,
     EXPORT_FILE_EXCLUDES,
 )
-from fragments import (
+from pmx_.fragments import (
     EXPORT_README,
     EXPORT_REQUIREMENTS,
 )
-from pm.collection import Collection
+from pmx_.pm.collection import Collection
 
 logging.getLogger("blib2to3").setLevel(logging.ERROR)
 

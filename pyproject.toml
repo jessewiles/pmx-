@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "pmxp"
+name = "pmx_"
 version = "0.1.0"
-description = ""
+description = "Postman exporter plus"
 authors = ["Jesse Wiles <jesse.wiles@boostinsurance.io>"]
 
 [tool.poetry.dependencies]
@@ -23,4 +23,4 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-"pmxp" = 'pmxp:cli'
+"pmx+" = 'pmx_.main:cli'

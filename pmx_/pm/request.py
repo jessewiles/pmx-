@@ -1,16 +1,14 @@
 from collections import defaultdict
 import json
-import logging
 import os
 import re
-import sys
 from typing import Any, Dict, List
 
 from jinja2 import Environment, Template
 
-from fragments import READ_PAYLOAD_DATA, READ_PAYLOAD_DATA_PANDADOC
-from pm.base import E2EBase
-from constants import (
+from pmx_.fragments import READ_PAYLOAD_DATA, READ_PAYLOAD_DATA_PANDADOC
+from pmx_.pm.base import E2EBase
+from pmx_.constants import (
     GREEK_LEN,
     GREEK_LETTERS,
     INDENTED,
@@ -18,10 +16,6 @@ from constants import (
     NEWLINE,
     PANDADOC_MESSASGE,
 )
-
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-
-logger = logging.getLogger("e2e")
 
 WRITE_OUT_EVENTS: bool = True
 
