@@ -3,6 +3,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
+import black
 from jinja2 import Environment, Template
 
 from constants import INDENTED, NEWLINE, PREFIX
@@ -25,13 +26,17 @@ class Collection(E2EBase):
         if input_dict:
             self.input_dict: Dict[str, Any] = input_dict
             self.level: int = level
-            self.name: Optional[str] = self.input_dict.get("name")
+            self.name: str = self.input_dict.get("name", str())
             self.normal_name: str = (
                 self.name.lower()
                 .replace(" ", "_")
                 .replace("(", "_")
                 .replace(")", "_")
                 .replace("-", "_")
+                .replace("/", "_")
+                .replace(",", "")
+                .replace(":", "")
+                .replace("&", "and")
             )
             # reference passed around to all collections for tracking module depth
             self.stack: List[str] = stack
@@ -127,8 +132,15 @@ class Collection(E2EBase):
             render_args["requests"] = self.requests
             render_args["scenario_name"] = self.name
 
+            black_mode = black.FileMode(
+                target_versions={black.mode.TargetVersion.PY310}, line_length=108
+            )
             content: str = self.base_template.render(**render_args)
             with open(self.base_scenario_path, "w") as writer:
+                try:
+                    content = black.format_str(content, mode=black_mode)
+                except Exception:
+                    pass
                 writer.write(content)
 
             content = self.scenarios_template.render(**render_args)

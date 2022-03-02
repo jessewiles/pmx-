@@ -20,7 +20,7 @@ def {{ normal_name }}_{{ greek }}():
 {%- if read_payload_data %}
 {{ read_payload_data }}
 {% endif %}
-    response = getattr(CLIENT, "{{ "poll" if "/documents" in furl else method|lower }}")(
+    response = getattr(CLIENT, "{{ method|lower }}")(
         "{{ furl }}".format_map(CLOSET_VARS),
 {% if read_payload_data %}        payload,{% endif %}
         greek="{{ greek }}"

@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from jinja2 import Environment, Template
 
@@ -23,7 +23,7 @@ logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 logger = logging.getLogger("e2e")
 
-WRITE_OUT_EVENTS: bool = False
+WRITE_OUT_EVENTS: bool = True
 
 
 class Request(E2EBase):
@@ -40,13 +40,17 @@ class Request(E2EBase):
         self.level: int = level
         self.count: int = count
         self.stack = stack
-        self.name: Optional[str] = self.input_dict.get("name")
+        self.name: str = self.input_dict.get("name", str())
         self.normal_name: str = (
             self.name.lower()
             .replace(" ", "_")
             .replace("(", "_")
             .replace(")", "_")
             .replace("-", "_")
+            .replace("/", "_")
+            .replace(",", "")
+            .replace(":", "")
+            .replace("&", "and")
         )
         self.method: str = self.input_dict.get("request", {}).get("method", "GET")
 
@@ -142,7 +146,7 @@ class Request(E2EBase):
         if not self._greek:
             if self.count >= GREEK_LEN:
                 n: int = int(self.count / GREEK_LEN)
-                item: str = GREEK_LETTERS[count % GREEK_LEN]
+                item: str = GREEK_LETTERS[self.count % GREEK_LEN]
                 self._greek = "_".join([item for _ in range(n)])
             else:
                 self._greek = GREEK_LETTERS[self.count]
@@ -173,7 +177,7 @@ class Request(E2EBase):
     def write_request(self) -> str:
         self.write_payload()
 
-        render_args: defaultdict = defaultdict(str)
+        render_args: Dict[str, str | bool] = defaultdict(str)
         render_args.update(
             {
                 "boost_user_key": self.boost_user_key,
@@ -205,10 +209,16 @@ class Request(E2EBase):
 
     def extract_event_vars(self, input_list: List) -> List[str]:
         result: List[str] = []
-        useNextLiteralVal: bool = False
+        use_next_literal_val: bool = False
+        ignore_next_environment_set: bool = False
+        find_open: bool = False
+        find_content: List[str] = []
         for line in input_list:
             line = line.split("//")[0]
             if "pm.variables.set" in line or "pm.environment.set" in line:
+                if ignore_next_environment_set:
+                    ignore_next_environment_set = False
+                    continue
                 trim = line.split("(")[1]
                 trim = trim.split(")")[0]
                 key, val = trim.split(", ")
@@ -217,6 +227,19 @@ class Request(E2EBase):
 
                 if "jsonData.data.id);" in line:
                     result.append(f'CLOSET_VARS["{key}"] = json_data.data.id')
+                    continue
+
+                if "jsonData.id);" in line:
+                    result.append(f'CLOSET_VARS["{key}"] = json_data.id')
+                    continue
+
+                if ', jsonData["data"]["id"])' in line:
+                    result.append(f'CLOSET_VARS["{key}"] = json_data.data.id')
+                    continue
+
+                if "jsonData.included" in line and line.endswith("find("):
+                    result.append(f'CLOSET_VARS["{key}"] = ')
+                    find_open = True
                     continue
 
                 er_type = (
@@ -251,16 +274,16 @@ class Request(E2EBase):
                     parts = line.split("jsonData")
                     # Second half of split minus trailing );
                     result.append(
-                        f'CLOSET_VARS["{key}"] = json_data{parts[-1].rstring(";").rstring(")")}'
+                        f'CLOSET_VARS["{key}"] = json_data{parts[-1].rstrip(";").rstrip(")")}'
                     )
                     continue
-                if useNextLiteralVal:
+                if use_next_literal_val:
                     if "format(" in line:
                         val = line.split(",")[-1].replace(";", "")[:-1]
                         result.append(f'CLOSET_VARS["{key}"] = {val}')
                     else:
                         result.append(f'CLOSET_VARS["{key}"] = {val}')
-                    useNextLiteralVal = False
+                    use_next_literal_val = False
                 else:
                     result.append(f'CLOSET_VARS["{key}"] = "{val}"')
 
@@ -294,6 +317,18 @@ class Request(E2EBase):
 
             elif "moment()" in line:
                 if "unix()" in line:
+                    stripped = line.strip()
+                    if stripped.startswith("let ") and stripped.endswith(
+                        "moment().unix()"
+                    ):
+                        wline = (
+                            line.replace("let ", 'CLOSET_VARS["')
+                            .replace(" = ", '"] = moment.now()')
+                            .replace("moment().unix()", "")
+                        )
+                        result.append(wline)
+                        ignore_next_environment_set = True
+                        continue
                     result.append("moment.now()")
                 else:
                     try:
@@ -305,15 +340,17 @@ class Request(E2EBase):
                         prefix = "(".join(parts[:-1])
                         suffix = f"({end_parts[1].strip()}={end_parts[0].strip()})"
                         result.append(f"{prefix}{suffix}")
-                        useNextLiteralVal = True
+                        use_next_literal_val = True
                     except IndexError:
                         logger.warning(f"bugging out on {line}")
 
             elif "pm.environment.get" in line and "pm.expect" not in line:
                 wline = (
                     line.replace("var ", 'CLOSET_VARS["')
+                    .replace("let ", 'CLOSET_VARS["')
                     .replace("pm.environment.get(", "CLOSET_VARS[")
                     .replace(");", "]")
+                    .replace(")", "]")
                     .replace(" = ", '"] = ')
                 )
                 result.append(wline.strip())
@@ -321,8 +358,10 @@ class Request(E2EBase):
             elif "pm.variables.get" in line and "pm.expect" not in line:
                 wline = (
                     line.replace("var ", 'CLOSET_VARS["')
+                    .replace("let ", 'CLOSET_VARS["')
                     .replace("pm.variables.get(", "CLOSET_VARS[")
                     .replace(");", "]")
+                    .replace(")", "]")
                     .replace(" = ", '"] = ')
                 )
                 result.append(wline.strip())
@@ -330,5 +369,21 @@ class Request(E2EBase):
             elif "setTimeout" in line:
                 timeout = int(line.split(",")[-1].rstrip(";").rstrip(")").strip())
                 result.append(f"time.sleep({timeout} / 1000)")
+
+            elif find_open:
+                if ")" in line:
+                    address: str = str()
+                    suffix_parts: List[str] = line.split(")")
+                    if len(suffix_parts) > 2:
+                        address = suffix_parts[1]
+
+                    # TODO: parse the stuff
+                    content: str = " ".join(find_content)
+                    result[-1] += f"finder(json_data.included, '{content}'){address}"
+                    # reset stuff
+                    find_open = False
+                    find_content = []
+                else:
+                    find_content.append(line.strip())
 
         return result

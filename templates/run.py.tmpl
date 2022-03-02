@@ -9,7 +9,12 @@ if __name__ == "__main__":
         for dir in dirs:
             if dir == "responses":
                 shutil.rmtree(dir, ignore_errors=True)
-    with futures.ThreadPoolExecutor(max_workers=2) as executor:
+    with futures.ThreadPoolExecutor(max_workers=4) as executor:
         tasks = [executor.submit(job) for job in ({{ import_fns }})]
         for f in futures.as_completed(tasks):
-            print(f"Completed something: result: {f.result()}")
+            try:
+                data = f.result()
+            except Exception as exc:
+                print('%r generated an exception: %s' % (f, exc))
+            else:
+                print(f"Completed something: result: {data}")

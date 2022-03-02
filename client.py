@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import os
@@ -57,15 +58,15 @@ class BoostClient:
     def namespace(self):
         return self._namespace
 
-    @property
-    def response_dir(self):
-        return os.path.join(self.original_response_dir, self.namespace)
-
     @namespace.setter
     def namespace(self, val):
         self._namespace = val
         if self.save_responses and self.response_dir:
             os.makedirs(self.response_dir, exist_ok=True)
+
+    @property
+    def response_dir(self):
+        return os.path.join(self.original_response_dir, self.namespace)
 
     @classmethod
     def sleep(cls, seconds=0.2):
@@ -119,6 +120,9 @@ class BoostClient:
         self.sleep()
         response = requests.get(endpoint, headers=self.read_headers)
         self._save_response(response, greek)
+        if "/documents" in endpoint:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                executor.submit(self.poll, endpoint, greek)
 
         return response
 
@@ -137,12 +141,10 @@ class BoostClient:
         return response
 
     def poll(self, endpoint, greek: str = str()):
-        print(f">>> POLLing endpoint: {endpoint} <<<")
         attempt: int = 0
-        limit: int = 20
+        limit: int = 10
         while attempt < limit:
-            print("Polling for docs")
-            time.sleep(3)
+            time.sleep(2)
             response = requests.get(endpoint, headers=self.read_headers)
             self._save_response(response, greek)
             data = response.json().get("data", [])
@@ -158,9 +160,9 @@ class BoostClient:
                         with open(dl_path, "wb") as writer:
                             writer.write(dl.content)
                     counter += 10
+                print(f"Completed downloads for endpoint: {endpoint}")
                 break
             attempt += 1
-        return response
 
     def _save_response(self, response: requests.Response, greek: str):
 

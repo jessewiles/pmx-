@@ -12,6 +12,7 @@ prodict = "^0.8.18"
 Jinja2 = "^3.0.3"
 click = "^8.0.4"
 enlighten = "^1.10.2"
+black = "^22.1.0"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.931"

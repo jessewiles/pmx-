@@ -4,9 +4,9 @@ import hmac
 import inspect
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
-from prodict import Prodict
+from prodict import Prodict  # type: ignore
 
 from .times import read_env_times
 from .global_vars import GLOBAL_VARS
@@ -90,7 +90,7 @@ def get_pandadoc_signature(
 def get_coverage_by_id(
     included: List[Dict[str, Any]],
     id_to_lookup: str,
-) -> str:
+) -> Optional[str]:
     try:
         coverage = next(
             filter(
@@ -101,12 +101,52 @@ def get_coverage_by_id(
             )
         )
     except StopIteration:
-        return str()
+        return None
 
     coverage = Prodict(**coverage)
-    return coverage.id
+    return coverage.id  # type: ignore
 
 
 def get_stack_path():
     stack = list(reversed([f.function for f in inspect.stack()]))[1:-3]
     return ".".join(stack)
+
+
+def finder(included: List[Dict[str, Any]], arrow_func: str) -> Optional[Prodict]:
+    def looker(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
+
+        def eval_func(item, k, v):
+            v = v.replace('"', str())
+            lookup = item
+            keys = list(reversed(k.split(".")[1:]))
+            while keys:
+                lookup = lookup.get(keys.pop(), {})
+            return lookup == v
+
+        try:
+            result = next(
+                filter(
+                    lambda i: all([eval_func(i, x, y) for x, y in pairs]),
+                    included,
+                )
+            )
+        except StopIteration:
+            print("stopiteration")
+            pass
+        return result
+
+    clean: str = arrow_func.split("=> ")[-1]
+    parts: List[str] = clean.split("&&")
+    exparts: List[Tuple[str, Any]] = []
+    for part in parts:
+        subparts: List[str] = list(map(lambda i: i.strip(), part.split("==")))
+        exparts.append(
+            (
+                subparts[0],
+                subparts[-1],
+            )
+        )
+    expresult = looker(exparts)
+    print(expresult)
+    return Prodict(**expresult)
