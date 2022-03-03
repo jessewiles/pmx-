@@ -5,7 +5,6 @@ sys.path.insert(0, {{pypath_prefix}}os.path.abspath(__file__){{pypath_suffix}})
 
 import inspect
 import json
-import sys
 import time
 
 import click
@@ -15,6 +14,7 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 
 from client import BoostClient
 from vars import (
+    ProgressBar,
     finder,
     get_entity_id,
     get_er_id,
@@ -23,6 +23,42 @@ from vars import (
     load_vars,
 )
 {{var_imports}}
+
+Progress = ProgressBar()
+
+
+def work_segment(fn):
+    def wrapper():
+        global Progress
+
+        if not Progress.caller:
+            Progress.init_top_caller(function_name, "{{ namespace }}")
+
+        fn()
+        Progress.increment_completed_work()
+        Progress.counter.update()  # type: ignore
+        if Progress.completed_work != Progress.total_work:
+            time.sleep(1)
+
+    source = inspect.getsourcelines(fn)
+    should_count: bool = True
+    register_next: bool = True
+    function_name: str = str()
+    for line in source[0]:
+        if should_count:
+            if register_next:
+                if "def" in line and "(" in line:
+                    function_name = line.lstrip()[4:].split("(")[0]
+                    Progress.calls[function_name] = 1
+                    register_next = False
+            elif "()" in line:
+                line = line.split("#")[0].strip()
+                call = line.replace("()", "")
+                if call in Progress.calls:
+                    Progress.calls[function_name] += Progress.calls[call]
+
+    return wrapper
+
 
 TEMPLATE_ENV: Environment = Environment(
     loader=PackageLoader("{{namespace}}", package_path="data"),
@@ -47,6 +83,7 @@ CLIENT = BoostClient(**CLOSET_VARS)
 
 
 # tous is the `everything` fn used by run.py at the top of the module
+@work_segment
 def tous():
 {% for request in requests %}
     {{ request.normal_name }}_{{ request.greek }}()  # {{ request.name -}}

@@ -6,6 +6,7 @@ import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+import enlighten
 from prodict import Prodict  # type: ignore
 
 from .times import read_env_times
@@ -150,3 +151,59 @@ def finder(included: List[Dict[str, Any]], arrow_func: str) -> Optional[Prodict]
     expresult = looker(exparts)
     print(expresult)
     return Prodict(**expresult)
+
+
+class ProgressBar:
+    def __init__(self):
+        self.manager: "enlighten.NotebookManager|enlighten.Manager" = (
+            enlighten.get_manager(no_resize=True)
+        )
+        self._counter: Optional[Any | enlighten.Counter] = None
+        self._calls: Dict[str, int] = {}
+        self._caller: str = str()
+        self._completed_work: int = 0
+        self._total_work: int = 0
+
+    @property
+    def counter(self):
+        return self._counter
+
+    @property
+    def caller(self):
+        return self._caller
+
+    @caller.setter
+    def caller(self, val):
+        self._caller = val
+
+    @property
+    def calls(self):
+        return self._calls
+
+    @property
+    def completed_work(self):
+        return self._completed_work
+
+    @property
+    def total_work(self):
+        return self._total_work
+
+    @property
+    def percent_done(self):
+        return f"{int((self.completed_work/self.total_work)*100)}%"
+
+    def init_top_caller(self, function_name: str, desc: str):
+        self.caller = function_name
+        self._total_work = self.calls[function_name]
+        self.make_counter(self.total_work, desc)
+
+    def make_counter(self, total: int, desc: str) -> None:
+        self._counter = self.manager.counter(
+            total=total, desc=desc, leave=True, color="green"
+        )
+
+    def increment_total_work(self):
+        self._total_work += 1
+
+    def increment_completed_work(self):
+        self._completed_work += 1
