@@ -149,7 +149,6 @@ def finder(included: List[Dict[str, Any]], arrow_func: str) -> Optional[Prodict]
             )
         )
     expresult = looker(exparts)
-    print(expresult)
     return Prodict(**expresult)
 
 
