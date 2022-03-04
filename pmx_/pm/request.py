@@ -17,7 +17,7 @@ from pmx_.constants import (
     PANDADOC_MESSASGE,
 )
 
-WRITE_OUT_EVENTS: bool = True
+WRITE_OUT_EVENTS: bool = False
 
 
 class Request(E2EBase):
